@@ -359,11 +359,11 @@ local function StartFarm()
                             if Inventory:FindFirstChild('Grass') then
                                 placing = 'Grass'
                             else
-                                local get = Tycoon.Blocks:FindFirstChild(Needs)
+                                local get = Tycoon.Blocks:FindFirstChild('Dirt')
                                 if get then
                                     BreakPos(get.Position)
                                 else
-                                    local sub = MinableSubs[Needs]
+                                    local sub = MinableSubs['Dirt']
                                     local getsub = Tycoon.Blocks:FindFirstChild(sub)
                                     if getsub then
                                         BreakPos(getsub.Position)
@@ -419,3 +419,7 @@ con = UIS.InputEnded:connect(function(input,processed)
     end
 end)
 print('Activated')
+
+--[[
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/TheAbsolutionism/BlockTycoon/main/OpenSource", true))()
+]]
