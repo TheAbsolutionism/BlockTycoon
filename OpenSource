@@ -1,0 +1,421 @@
+local Exploiter = game.Players.LocalPlayer
+local ReplicatedStorage = game:GetService('ReplicatedStorage')
+local UIS = game:GetService('UserInputService')
+
+local Tycoon = workspace.Plots:WaitForChild(tostring(Exploiter.userId))
+local Inventory = Exploiter.Inventory
+local Cash = Exploiter.leaderstats.Cash
+
+local PlayerGlobals = require(Exploiter.PlayerScripts.Modules.PlayerGlobals)
+
+local ShopEvent = ReplicatedStorage.ShopE
+local PlaceBlock = ReplicatedStorage.PlaceBlockE
+local AccessoryChange = ReplicatedStorage.AccessoryChangeF
+local BreakBlock = ReplicatedStorage.BreakBlockE
+
+local Rotations = {
+    ['-180,0,-180'] = '+Z';
+    ['0,0,0'] = '-Z';
+    ['0,-90,0'] = '+X';
+    ['0,90,0'] = '-X';
+}
+local RotPlacements = {
+    ['+Z'] = Enum.NormalId.Front;
+    ['-Z'] = Enum.NormalId.Back;
+    ['+X'] = Enum.NormalId.Left;
+    ['-X'] = Enum.NormalId.Right;
+}
+local GetRotations = {
+    ['+Z'] = Vector3.new(-180,0,-180);
+    ['-Z'] = Vector3.new(0,0,0);
+    ['+X'] = Vector3.new(0,-90,0);
+    ['-X'] = Vector3.new(0,90,0);
+}
+
+local BlockPrices = {
+    ['WheatSeeds'] = 100000;
+    ['Farmer'] = 100000;
+}
+local BlockMinables = {
+    'Dirt'
+}
+local MinableSubs = {
+    ['Dirt'] = 'Grass'
+}
+local Disposables = {
+    'Cobble','CompCobblestone','CompCobbleBricks','CompCobblePillar',
+    'StoneBlock','StoneBricks','StonePillar',
+    'MarblePillar','MarbleBricks','MarbleBlock','CompMarble','CompMarbleBricks','CompMarblePillar',
+    'PinePlanks','PineLog',
+    'PalmPlanks','PalmLog',
+    'GhostGumLog','GhostGumPlanks',
+    'OakLog','OakPlanks',
+    'SandstoneRough','Sandstone','Sand',
+    'ClayBlock',
+    'BasaltBlock','BasaltBricks','BasaltPillar','CompBasalt','CompBasaltBricks','CompBasaltPillar',
+    'BrickBlock',
+}
+local Pickaxes = {
+    'WoodPick','StonePick','IronPick','DiamondPick'
+}
+
+--[[
+    +Z = Left
+    -Z = Right
+    +X = Down
+    -X = Up
+]]
+
+local function NewNotification(message,dur)
+    game:GetService('StarterGui'):SetCore('SendNotification',{
+        Title = 'Absolute Block';
+        Icon = '';
+        Text = message;
+        Duration = (dur or 5);
+    })
+    print(message)
+    return
+end
+
+
+local FarmersFound = {}
+local FarmerOn
+local LayerOn = 0
+local SpotsNeeded = {}
+
+local farming = false
+local shutdown = false
+
+local function BreakPos(Pos)
+    local PickChosen
+    for i,v in pairs(Pickaxes) do
+        if Inventory:FindFirstChild(v) then
+            PickChosen = Inventory:FindFirstChild(v)
+        end
+    end
+    local NewPos = Pos
+    local NewRay = Ray.new(NewPos-Vector3.new(0,2,0),Vector3.new(0,100,0))
+    local retpos,retblock = PlayerGlobals.findPos(NewRay,'Break',Exploiter.Character,{workspace.Items})
+    if retpos then
+        local c = 0
+        while wait(0.1) do
+            c += 1
+            BreakBlock:FireServer(1,{PickChosen,NewPos})
+            if retblock == nil then
+                break
+            end
+            if c >= 10 then
+                retpos,retblock = PlayerGlobals.findPos(NewRay,'Break',Exploiter.Character,{workspace.Items})
+                c = 0
+            end
+        end
+    end
+end
+local function CheckPos(Pos,con,Needs,namefind,Rot,co)
+    local NewPos = Pos
+    local c = co or 0
+    local NewRay = Ray.new(NewPos-Vector3.new(0,2,0),Vector3.new(0,100,0))
+    local retpos,retblock = PlayerGlobals.findPos(NewRay,'Break',Exploiter.Character,{workspace.Items})
+    if retblock ~= nil and ((namefind == false and retblock.Name ~= Needs) or (namefind == true and not string.find(retblock.Name,Needs))) then
+        local poos = (retblock:IsA('Part') and retblock.Position) or retblock.PrimaryPart.Position
+        BreakPos(poos)
+    end
+    if retblock == nil and con == true then
+        if not Inventory:FindFirstChild(Needs) then
+            if BlockPrices[Needs] then
+                repeat wait() until Cash.Value >= BlockPrices[Needs]
+                ShopEvent:FireServer(1,{Needs,1})
+                repeat wait() until Inventory:FindFirstChild(Needs)
+            elseif table.find(BlockMinables,Needs) then
+                local get = Tycoon.Blocks:FindFirstChild(Needs)
+                if get then
+                    BreakPos(get.Position)
+                else
+                    local sub = MinableSubs[Needs]
+                    local getsub = Tycoon.Blocks:FindFirstChild(sub)
+                    if getsub then
+                        BreakPos(getsub.Position)
+                    end
+                end
+            end
+        end
+        if Inventory:FindFirstChild(Needs) then
+            PlaceBlock:FireServer(1,{Needs,NewPos,Inventory:FindFirstChild(Needs),Rot})
+        end
+    end
+    if retblock == nil and con == false then
+        return retpos,retblock
+    end
+    if retblock and namefind == false and retblock.Name == Needs then
+        return retpos,retblock
+    end
+    if retblock and namefind == true and string.find(retblock.Name,Needs) then
+        return retpos,retblock
+    end
+    if c >= 10 then
+        return nil,nil
+    end
+    return CheckPos(Pos,con,Needs,namefind,Rot,c+1)
+
+    --[[
+    if ((namefind == false and retblock.Name == Needs) or (namefind == true and string.find(retblock.Name,Needs))) or (retpos == nil and con == false) then
+        return retpos,retblock
+    else
+        return CheckPos(Pos,con,Needs,namefind,Rot)
+    end
+    ]]
+end
+local function CheckSpot(farmer,GetRot)
+    local mult
+    local doing
+    if GetRot == '+Z' then
+        mult = 3
+        doing = 'Z'
+    elseif GetRot == '-Z' then
+        mult = -3
+        doing = 'Z'
+    elseif GetRot == '+X' then
+        mult = 3
+        doing = 'X'
+    elseif GetRot == '-X' then
+        mult = -3
+        doing = 'X'
+    end
+    local YPos = farmer.HBH.Position.Y
+    local NewSpots = {}
+    for i = -1,1,1 do
+        local spot1
+        if doing == 'Z' then
+            spot1 = farmer.HBH.Position.X+(3*i)
+        elseif doing == 'X' then
+            spot1 = farmer.HBH.Position.Z+(3*i)
+        end
+        for i2 = 1,3,1 do
+            local spot2
+            if doing == 'Z' then
+                spot2 = farmer.HBH.Position.Z+(mult*i2)
+            elseif doing == 'X' then
+                spot2 = farmer.HBH.Position.X+(mult*i2)
+            end
+            
+            local pos
+            if doing == 'Z' then
+                pos = Vector3.new(spot1,YPos,spot2)
+            elseif doing == 'X' then
+                pos = Vector3.new(spot2,YPos,spot1)
+            end
+            local NewRay = Ray.new(pos-Vector3.new(0,2,0),Vector3.new(0,100,0))
+            --local retpos,retblock = CheckPos(pos,false,'Wheat',true,nil)
+            local retpos,retblock = PlayerGlobals.findPos(NewRay,'Break',farmer,{workspace.Items})
+            if retpos == nil then
+                local s = {
+                    ['X'] = (doing == 'X' and spot2) or spot1;
+                    ['Y'] = YPos;
+                    ['Z'] = (doing == 'Z' and spot2) or spot1;
+                }
+                table.insert(NewSpots,s)
+            end
+        end
+    end
+    return NewSpots
+end
+local function CheckFarmer(farmer,c)
+    if LayerOn == 12 then
+        NewNotification('Reached Max Layer')
+        return
+    end
+    local hbh = farmer.HBH
+    local GetRot = Rotations[tostring(hbh.Rotation.X)..','..tostring(hbh.Rotation.Y)..','..tostring(hbh.Rotation.Z)]
+    print('Checking Farmer: ',tostring(hbh.Position),' | ',GetRot)
+    local Spots = CheckSpot(farmer,GetRot)
+    if #Spots > 0 then
+        FarmerOn = farmer
+        SpotsNeeded = Spots
+    else
+        local ymult = 0
+        local zmult 
+        local xmult
+        local nextrotation
+        local nextrot
+        if GetRot == '-Z' then
+            zmult = 3
+            xmult = 3
+            nextrotation = Vector3.new(0,-90,0)
+            nextrot = '+X'
+        elseif GetRot == '+Z' then
+            zmult = -3
+            xmult = -3
+            nextrotation = Vector3.new(0,90,0)
+            nextrot = '-X'
+        elseif GetRot == '-X' then
+            zmult = -3
+            xmult = 3
+            nextrotation = Vector3.new(0,0,0)
+            nextrot = '-Z'
+        elseif GetRot == '+X' then
+            zmult = 3
+            xmult = -3
+            nextrotation = Vector3.new(-180,0,-180)
+            nextrot = '+Z'
+        end
+
+        if c == 5 then
+            c = 1
+            ymult = 6
+            xmult = 0
+            zmult = 0
+            nextrot = GetRot
+            LayerOn += 1
+        end
+        if LayerOn == 12 then
+            NewNotification('Reached Max Layer')
+            return
+        end
+
+        local NextPos = hbh.Position+Vector3.new(1*xmult,1*ymult,1*zmult)
+        local TestNext
+        if FarmersFound[tostring(NextPos.X)..','..tostring(NextPos.Y)..','..tostring(NextPos.Z)] then 
+            TestNext = FarmersFound[tostring(NextPos.X)..','..tostring(NextPos.Y)..','..tostring(NextPos.Z)]
+        else
+            local NewRay = Ray.new(NextPos-Vector3.new(0,2,0),Vector3.new(0,100,0))
+            --local retpos,retblock = CheckPos(NextPos,true,'Farmer',false,RotPlacements[nextrot])
+            local retpos,retblock = PlayerGlobals.findPos(NewRay,'Break',farmer,{workspace.Items})
+            if retpos == nil then
+                print('Needs Farmer: ',NextPos)
+
+                if not Inventory:FindFirstChild('Farmer') then
+                    repeat wait() until Cash.Value >= 100000
+                    ShopEvent:FireServer(1,{'Farmer',1})
+                    repeat wait() until Inventory:FindFirstChild('Farmer')
+                end
+                coroutine.resume(coroutine.create(function()
+                    
+                end))
+                PlaceBlock:FireServer(1,{'Farmer',NextPos,Inventory:FindFirstChild('Farmer'),RotPlacements[nextrot]})
+                wait(1)
+                repeat 
+                    wait()
+                    NewRay = Ray.new(NextPos-Vector3.new(0,2,0),Vector3.new(0,100,0))
+                    retpos,retblock = PlayerGlobals.findPos(NewRay,'Break',farmer,{workspace.Items})
+                until retpos ~= nil and retblock ~= nil and (retblock.Parent.Name == 'Farmer' or retblock.Name == 'Farmer') and (retblock:IsDescendantOf(Tycoon))
+            end
+            TestNext = retblock
+        end
+        if TestNext then
+            CheckFarmer(TestNext,c+1)
+        end
+    end
+end
+local function IdentifyFarming()
+    if LayerOn == 12 then
+        NewNotification('Reached Max Layer')
+        return
+    end
+    local starter
+    local found = 0
+    for i,v in pairs(Tycoon.Blocks:GetChildren()) do
+        if v.Name == 'Farmer' then
+            if v.HBH.Position.Y == 45 then
+                starter = v
+            end
+            found += 1
+            FarmersFound[tostring(v.HBH.Position.X)..','..tostring(v.HBH.Position.Y)..','..tostring(v.HBH.Position.Z)] = v
+        end
+    end
+    if not starter then return false end
+    CheckFarmer(starter,1)
+end
+
+local function StartFarm()
+    if FarmerOn == nil then
+        IdentifyFarming()
+    end
+    while wait() do
+        if farming == false or shutdown == true then break end
+        if FarmerOn == nil then
+            IdentifyFarming()
+        end
+        if FarmerOn ~= nil then
+            if #SpotsNeeded == 0 then
+                CheckFarmer(FarmerOn,1)
+            else
+                local GetSpot = SpotsNeeded[1]
+                local SpotPos = Vector3.new(GetSpot.X,GetSpot.Y,GetSpot.Z)
+                local DirtPos = SpotPos-Vector3.new(0,3,0)
+                if not Inventory:FindFirstChild('WheatSeeds') then
+                    repeat wait() until Cash.Value >= 100000
+                    ShopEvent:FireServer(1,{'WheatSeeds',1})
+                    repeat wait() until Inventory:FindFirstChild('WheatSeeds')
+                end
+                local hasdirt = true
+                if LayerOn > 0 then
+                    local NewRay = Ray.new(DirtPos-Vector3.new(0,2,0),Vector3.new(0,100,0))
+                    hasdirt = false
+                    --local retpos,retblock = CheckPos(DirtPos,false,'Dirt',false,nil)
+                    local retpos,retblock = PlayerGlobals.findPos(NewRay,'Break',FarmerOn,{workspace.Items})
+                    if retpos == nil then
+                        local placing = 'Dirt'
+                        if not Inventory:FindFirstChild('Dirt') then
+                            if Inventory:FindFirstChild('Grass') then
+                                placing = 'Grass'
+                            else
+                                local get = Tycoon.Blocks:FindFirstChild(Needs)
+                                if get then
+                                    BreakPos(get.Position)
+                                else
+                                    local sub = MinableSubs[Needs]
+                                    local getsub = Tycoon.Blocks:FindFirstChild(sub)
+                                    if getsub then
+                                        BreakPos(getsub.Position)
+                                        placing = 'Grass'
+                                    end
+                                end
+                            end
+                        end
+                        if Inventory:FindFirstChild(placing) then
+                            PlaceBlock:FireServer(1,{placing,DirtPos,Inventory:FindFirstChild(placing),Enum.NormalId.Front})
+                            repeat 
+                                wait()
+                                retpos,retblock = PlayerGlobals.findPos(NewRay,'Break',FarmerOn,{workspace.Items})
+                            until retpos ~= nil
+                            hasdirt = true
+                        end
+                    end
+                end
+                if hasdirt == true then
+                    print('Placing WheatSeeds: ',SpotPos)
+                    PlaceBlock:FireServer(1,{'WheatSeeds',SpotPos,Inventory:FindFirstChild('WheatSeeds'),Enum.NormalId.Front})
+                    wait(1)
+                    local NewRay = Ray.new(SpotPos-Vector3.new(0,2,0),Vector3.new(0,100,0))
+                    local retpos,retblock = PlayerGlobals.findPos(NewRay,'Break',FarmerOn,{workspace.Items})
+                    repeat 
+                        wait()
+                        retpos,retblock = PlayerGlobals.findPos(NewRay,'Break',FarmerOn,{workspace.Items})
+                    until retpos ~= nil
+                    table.remove(SpotsNeeded,1)
+                end
+            end
+        end
+    end
+end
+
+local con
+con = UIS.InputEnded:connect(function(input,processed)
+    if shutdown == true then return end
+    if not processed then
+        if input.KeyCode == Enum.KeyCode.KeypadOne then
+            farming = (not farming)
+            print('Farming: ',farming)
+            if farming then
+                StartFarm()
+            end
+        elseif input.KeyCode == Enum.KeyCode.KeypadNine then
+            print('Shutdown')
+            shutdown = true
+            farming = false
+            con:disconnect()
+            con = nil
+        end
+    end
+end)
+print('Activated')
